@@ -3,6 +3,7 @@ import re
 import json
 import typer
 import requests
+from datetime import datetime, timezone
 import urllib3
 from git import Repo, InvalidGitRepositoryError
 from rich.console import Console
@@ -459,6 +460,9 @@ def _render_comment_with_replies(comment, tree_node, indent=0):
     text = comment.get("text", "")
     severity = comment.get("severity", "NORMAL")
     state = comment.get("state", "")
+    created_date = comment.get("createdDate")
+
+    timestamp = _format_timestamp(created_date)
 
     severity_badge = ""
     if severity == "BLOCKER":
@@ -468,12 +472,27 @@ def _render_comment_with_replies(comment, tree_node, indent=0):
     if state == "RESOLVED":
         state_badge = " [green](resolved)[/green]"
 
-    header = f"[bold]{escape(author)}[/bold]{severity_badge}{state_badge}"
+    header = f"[bold]{escape(author)}[/bold]"
+    if timestamp:
+        header += f" [dim]{escape(timestamp)}[/dim]"
+    header += f"{severity_badge}{state_badge}"
     body = f"{header}\n{escape(text)}"
     child_node = tree_node.add(body)
 
     for reply in comment.get("comments", []):
         _render_comment_with_replies(reply, child_node, indent + 1)
+
+
+def _format_timestamp(timestamp_ms):
+    if not timestamp_ms:
+        return ""
+
+    try:
+        dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).astimezone()
+    except (OSError, OverflowError, ValueError, TypeError):
+        return ""
+
+    return dt.strftime("%Y-%m-%d %H:%M %Z")
 
 
 def _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id):
