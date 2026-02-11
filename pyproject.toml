@@ -1,0 +1,22 @@
+[project]
+name = "stash-cli"
+version = "0.1.0"
+description = "CLI tool for Stash/Bitbucket Server"
+authors = [
+    {name = "OpenClaw",email = "agent@openclaw.ai"}
+]
+readme = "README.md"
+requires-python = "^3.10"
+dependencies = [
+    "typer (>=0.21.2,<0.22.0)",
+    "requests (>=2.32.5,<3.0.0)",
+    "gitpython (>=3.1.46,<4.0.0)",
+    "rich (>=14.3.2,<15.0.0)"
+]
+
+[project.scripts]
+stash-cli = "stash_cli.main:app"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
