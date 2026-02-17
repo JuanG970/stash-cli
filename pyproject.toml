@@ -1,9 +1,9 @@
 [project]
 name = "stash-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI tool for Stash/Bitbucket Server"
 authors = [
-    {name = "OpenClaw",email = "agent@openclaw.ai"}
+    {name = "Juan Gonzalez",email = "juan.angel19@hotmail.com"}
 ]
 readme = "README.md"
 requires-python = "^3.10"

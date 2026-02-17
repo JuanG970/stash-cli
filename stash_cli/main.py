@@ -4,6 +4,7 @@ import json
 import typer
 import requests
 from datetime import datetime, timezone
+import urllib.parse
 import urllib3
 from git import Repo, InvalidGitRepositoryError
 from rich.console import Console
@@ -86,7 +87,7 @@ def callback():
 def get_env_vars():
     base_url = os.environ.get("STASH_BASE_URL")
     token = Secret(os.environ.get("STASH_ACCESS_TOKEN", ""))
-    
+
     if not base_url or not token.get():
         console.print("[bold red]Error:[/bold red] Missing environment variables.")
         console.print("Please set the following environment variables:")
@@ -95,8 +96,18 @@ def get_env_vars():
         if not token:
             console.print("  - [bold yellow]STASH_ACCESS_TOKEN[/bold yellow]")
         raise typer.Exit(code=1)
-    
+
     return base_url.rstrip("/"), token
+
+
+def get_access_token():
+    token = Secret(os.environ.get("STASH_ACCESS_TOKEN", ""))
+    if not token.get():
+        console.print("[bold red]Error:[/bold red] Missing environment variables.")
+        console.print("Please set the following environment variables:")
+        console.print("  - [bold yellow]STASH_ACCESS_TOKEN[/bold yellow]")
+        raise typer.Exit(code=1)
+    return token
 
 
 def api_get(url, token, params=None):
@@ -344,6 +355,27 @@ def _find_pr_for_branch(base_url, token, project_key, repo_slug, branch):
     return None
 
 
+def _parse_pr_url(pr_url):
+    parsed = urllib.parse.urlparse(pr_url)
+    if not parsed.scheme or not parsed.netloc:
+        console.print(f"[bold red]Error:[/bold red] Invalid URL: {pr_url}")
+        raise typer.Exit(code=1)
+
+    match = re.search(
+        r"/projects/(?P<project>[^/]+)/repos/(?P<repo>[^/]+)/pull-requests/(?P<id>\d+)",
+        parsed.path,
+    )
+    if not match:
+        console.print(f"[bold red]Error:[/bold red] Could not parse PR URL: {pr_url}")
+        raise typer.Exit(code=1)
+
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    project_key = match.group("project")
+    repo_slug = match.group("repo")
+    pr_id = match.group("id")
+    return base_url, project_key, repo_slug, pr_id
+
+
 def _render_pr_header(pr, base_url, project_key, repo_slug):
     """Print a rich panel with the PR summary."""
     pr_id = pr.get("id")
@@ -584,6 +616,10 @@ def pr(
         None, "--branch", "-b",
         help="Branch name to look up (defaults to current branch)"
     ),
+    url: str = typer.Option(
+        None, "--url", "-u",
+        help="Stash PR URL to use instead of auto-detecting from git status"
+    ),
     no_comments: bool = typer.Option(
         False, "--no-comments",
         help="Skip fetching comments"
@@ -594,44 +630,79 @@ def pr(
     ),
 ):
     """Show the active Pull Request for the current branch with comments and tasks."""
-    base_url, token = get_env_vars()
-    project_key, repo_slug = get_git_context()
+    if url:
+        base_url, project_key, repo_slug, pr_id = _parse_pr_url(url)
+        token = get_access_token()
 
-    # Resolve branch
-    if not branch:
+        console.print(
+            f"Looking up PR [cyan]#{pr_id}[/cyan] in "
+            f"[cyan]{project_key}/{repo_slug}[/cyan]...\n"
+        )
+
+        pr_api_url = (
+            f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}"
+            f"/pull-requests/{pr_id}"
+        )
+
+        if dry_run:
+            safe_headers = {"Authorization": f"Bearer {token}"}
+            print_api_call("GET", pr_api_url, headers=safe_headers)
+            if not no_comments:
+                print_api_call(
+                    "GET",
+                    f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests/{pr_id}/activities",
+                    headers=safe_headers,
+                )
+            return
+
         try:
-            repo = Repo(os.getcwd(), search_parent_directories=True)
-            branch = repo.active_branch.name
-        except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] Could not determine current branch: {e}")
+            headers = {"Authorization": f"Bearer {token.get()}"}
+            verify = get_ssl_verify()
+            response = requests.get(pr_api_url, headers=headers, timeout=10, verify=verify)
+            response.raise_for_status()
+            pr_data = response.json()
+        except requests.exceptions.RequestException as e:
+            console.print(f"[bold red]Error fetching PR:[/bold red] {e}")
+            raise typer.Exit(code=1)
+    else:
+        base_url, token = get_env_vars()
+        project_key, repo_slug = get_git_context()
+
+        # Resolve branch
+        if not branch:
+            try:
+                repo = Repo(os.getcwd(), search_parent_directories=True)
+                branch = repo.active_branch.name
+            except Exception as e:
+                console.print(f"[bold red]Error:[/bold red] Could not determine current branch: {e}")
+                raise typer.Exit(code=1)
+
+        console.print(f"Looking up active PR for branch [cyan]{branch}[/cyan] "
+                      f"in [cyan]{project_key}/{repo_slug}[/cyan]...\n")
+
+        pr_url = f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests"
+        pr_params = {"state": "OPEN", "direction": "OUTGOING", "at": f"refs/heads/{branch}"}
+
+        if dry_run:
+            safe_headers = {"Authorization": f"Bearer {token}"}
+            print_api_call("GET", pr_url, headers=safe_headers, params=pr_params)
+            if not no_comments:
+                print_api_call("GET",
+                               f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests/{{prId}}/activities",
+                               headers=safe_headers)
+            return
+
+        try:
+            pr_data = _find_pr_for_branch(base_url, token, project_key, repo_slug, branch)
+        except requests.exceptions.RequestException as e:
+            console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
             raise typer.Exit(code=1)
 
-    console.print(f"Looking up active PR for branch [cyan]{branch}[/cyan] "
-                  f"in [cyan]{project_key}/{repo_slug}[/cyan]...\n")
+        if not pr_data:
+            console.print(f"[yellow]No open pull request found for branch '{branch}'.[/yellow]")
+            raise typer.Exit(code=0)
 
-    pr_url = f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests"
-    pr_params = {"state": "OPEN", "direction": "OUTGOING", "at": f"refs/heads/{branch}"}
-
-    if dry_run:
-        safe_headers = {"Authorization": f"Bearer {token}"}
-        print_api_call("GET", pr_url, headers=safe_headers, params=pr_params)
-        if not no_comments:
-            print_api_call("GET",
-                           f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests/{{prId}}/activities",
-                           headers=safe_headers)
-        return
-
-    try:
-        pr_data = _find_pr_for_branch(base_url, token, project_key, repo_slug, branch)
-    except requests.exceptions.RequestException as e:
-        console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
-        raise typer.Exit(code=1)
-
-    if not pr_data:
-        console.print(f"[yellow]No open pull request found for branch '{branch}'.[/yellow]")
-        raise typer.Exit(code=0)
-
-    pr_id = pr_data.get("id")
+        pr_id = pr_data.get("id")
 
     # --- Header ---
     _render_pr_header(pr_data, base_url, project_key, repo_slug)
