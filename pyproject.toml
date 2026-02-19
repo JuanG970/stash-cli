@@ -1,6 +1,6 @@
 [project]
 name = "stash-cli"
-version = "0.1.1"
+version = "0.2.0"
 description = "CLI tool for Stash/Bitbucket Server"
 authors = [
     {name = "Juan Gonzalez",email = "juan.angel19@hotmail.com"}
