@@ -21,45 +21,48 @@ console = Console()
 
 class Secret:
     """Wrapper for sensitive values that redacts them when converted to string."""
-    
+
     def __init__(self, value):
         self._value = value
-    
+
     def __str__(self):
         return "***REDACTED***"
-    
+
     def __repr__(self):
         return "***REDACTED***"
-    
+
     def get(self):
         """Get the actual secret value."""
         return self._value
+
 
 def print_api_call(method, url, headers=None, params=None, payload=None):
     """Print formatted API call details for dry-run mode."""
     console.print("\n[bold yellow]DRY RUN - API Call Details[/bold yellow]")
     console.print(f"[bold]Method:[/bold] [cyan]{method}[/cyan]")
     console.print(f"[bold]Endpoint:[/bold] {url}")
-    
+
     if headers:
         console.print(f"\n[bold]Headers:[/bold]")
         headers_json = json.dumps(headers, indent=2)
         syntax = Syntax(headers_json, "json", theme="monokai", line_numbers=False)
         console.print(syntax)
-    
+
     if params:
         console.print(f"\n[bold]Query Parameters:[/bold]")
         params_json = json.dumps(params, indent=2)
         syntax = Syntax(params_json, "json", theme="monokai", line_numbers=False)
         console.print(syntax)
-    
+
     if payload:
         console.print(f"\n[bold]Payload:[/bold]")
         payload_json = json.dumps(payload, indent=2)
         syntax = Syntax(payload_json, "json", theme="monokai", line_numbers=False)
         console.print(syntax)
-    
-    console.print("\n[bold yellow]Note:[/bold yellow] No actual API request will be made in dry-run mode.\n")
+
+    console.print(
+        "\n[bold yellow]Note:[/bold yellow] No actual API request will be made in dry-run mode.\n"
+    )
 
 
 def get_ssl_verify():
@@ -78,11 +81,13 @@ def get_ssl_verify():
         return val
     return True
 
+
 @app.callback()
 def callback():
     """
     Stash CLI tool.
     """
+
 
 def get_env_vars():
     base_url = os.environ.get("STASH_BASE_URL")
@@ -92,7 +97,9 @@ def get_env_vars():
         console.print("[bold red]Error:[/bold red] Missing environment variables.")
         console.print("Please set the following environment variables:")
         if not base_url:
-            console.print("  - [bold yellow]STASH_BASE_URL[/bold yellow] (e.g., https://stash.example.com)")
+            console.print(
+                "  - [bold yellow]STASH_BASE_URL[/bold yellow] (e.g., https://stash.example.com)"
+            )
         if not token:
             console.print("  - [bold yellow]STASH_ACCESS_TOKEN[/bold yellow]")
         raise typer.Exit(code=1)
@@ -139,6 +146,7 @@ def api_get(url, token, params=None):
 
     return all_values
 
+
 def get_git_context():
     try:
         repo = Repo(os.getcwd(), search_parent_directories=True)
@@ -157,11 +165,11 @@ def get_git_context():
     # ssh://git@stash.example.com:7999/PROJ/repo.git
     # https://stash.example.com/scm/PROJ/repo.git
     # git@stash.example.com:PROJ/repo.git
-    
+
     # Remove .git suffix
     if remote_url.endswith(".git"):
         remote_url = remote_url[:-4]
-    
+
     # Regex for standard Bitbucket Server URLs
     # Matches /PROJ/repo at the end
     match = re.search(r"/(?P<project>[^/]+)/(?P<repo>[^/]+)$", remote_url)
@@ -175,14 +183,19 @@ def get_git_context():
             project_key = match_scp.group("project")
             repo_slug = match_scp.group("repo")
         else:
-            console.print(f"[bold red]Error:[/bold red] Could not parse project and repo from remote URL: {remote_url}")
+            console.print(
+                f"[bold red]Error:[/bold red] Could not parse project and repo from remote URL: {remote_url}"
+            )
             raise typer.Exit(code=1)
 
     return project_key, repo_slug
 
+
 @app.command()
 def list_prs(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print API call details without executing")
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print API call details without executing"
+    ),
 ):
     """List open Pull Requests for the current repository."""
     base_url, token = get_env_vars()
@@ -201,21 +214,23 @@ def list_prs(
         return
 
     try:
-        response = requests.get(api_url, headers=headers, params=params, timeout=10, verify=verify)
+        response = requests.get(
+            api_url, headers=headers, params=params, timeout=10, verify=verify
+        )
         response.raise_for_status()
         data = response.json()
     except requests.exceptions.RequestException as e:
         console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
-        if hasattr(e, 'response') and e.response is not None:
-             console.print(f"Status: {e.response.status_code}")
-             # Try to print error message from Stash if available
-             try:
-                 err_data = e.response.json()
-                 errors = err_data.get("errors", [])
-                 for err in errors:
-                     console.print(f"[red]{err.get('message')}[/red]")
-             except:
-                 pass
+        if hasattr(e, "response") and e.response is not None:
+            console.print(f"Status: {e.response.status_code}")
+            # Try to print error message from Stash if available
+            try:
+                err_data = e.response.json()
+                errors = err_data.get("errors", [])
+                for err in errors:
+                    console.print(f"[red]{err.get('message')}[/red]")
+            except:
+                pass
         raise typer.Exit(code=1)
 
     values = data.get("values", [])
@@ -245,90 +260,101 @@ def list_prs(
 
     console.print(table)
 
+
 @app.command()
 def create_pr(
     title: str = typer.Option(..., "--title", "-t", help="Pull request title"),
-    description: str = typer.Option("", "--description", "-d", help="Pull request description"),
-    source_branch: str = typer.Option(None, "--source", "-s", help="Source branch (defaults to current branch)"),
-    target_branch: str = typer.Option("master", "--target", "-b", help="Target branch (default: master)"),
-    reviewers: str = typer.Option("", "--reviewers", "-r", help="Comma-separated list of reviewer usernames"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print API call details without executing"),
+    description: str = typer.Option(
+        "", "--description", "-d", help="Pull request description"
+    ),
+    source_branch: str = typer.Option(
+        None, "--source", "-s", help="Source branch (defaults to current branch)"
+    ),
+    target_branch: str = typer.Option(
+        "master", "--target", "-b", help="Target branch (default: master)"
+    ),
+    reviewers: str = typer.Option(
+        "", "--reviewers", "-r", help="Comma-separated list of reviewer usernames"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print API call details without executing"
+    ),
 ):
     """Create a Pull Request in Stash/Bitbucket Server."""
     base_url, token = get_env_vars()
     project_key, repo_slug = get_git_context()
-    
+
     # Get current branch if source not specified
     if not source_branch:
         try:
             repo = Repo(os.getcwd(), search_parent_directories=True)
             source_branch = repo.active_branch.name
-            console.print(f"Using current branch as source: [cyan]{source_branch}[/cyan]")
+            console.print(
+                f"Using current branch as source: [cyan]{source_branch}[/cyan]"
+            )
         except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] Could not determine current branch: {e}")
+            console.print(
+                f"[bold red]Error:[/bold red] Could not determine current branch: {e}"
+            )
             raise typer.Exit(code=1)
-    
-    console.print(f"Creating PR: [cyan]{source_branch}[/cyan] -> [cyan]{target_branch}[/cyan]")
-    
+
+    console.print(
+        f"Creating PR: [cyan]{source_branch}[/cyan] -> [cyan]{target_branch}[/cyan]"
+    )
+
     api_url = f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests"
     headers = {
         "Authorization": f"Bearer {token.get()}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
     verify = get_ssl_verify()
-    
+
     # Build the payload
     payload = {
         "title": title,
         "description": description,
         "fromRef": {
             "id": f"refs/heads/{source_branch}",
-            "repository": {
-                "slug": repo_slug,
-                "project": {
-                    "key": project_key
-                }
-            }
+            "repository": {"slug": repo_slug, "project": {"key": project_key}},
         },
         "toRef": {
             "id": f"refs/heads/{target_branch}",
-            "repository": {
-                "slug": repo_slug,
-                "project": {
-                    "key": project_key
-                }
-            }
-        }
+            "repository": {"slug": repo_slug, "project": {"key": project_key}},
+        },
     }
-    
+
     # Add reviewers if provided
     if reviewers:
         reviewer_list = [r.strip() for r in reviewers.split(",") if r.strip()]
-        payload["reviewers"] = [{"user": {"name": username}} for username in reviewer_list]
-    
+        payload["reviewers"] = [
+            {"user": {"name": username}} for username in reviewer_list
+        ]
+
     if dry_run:
         safe_headers = {"Authorization": f"Bearer {token}"}
         print_api_call("POST", api_url, headers=safe_headers, payload=payload)
         return
-    
+
     try:
-        response = requests.post(api_url, headers=headers, json=payload, timeout=10, verify=verify)
+        response = requests.post(
+            api_url, headers=headers, json=payload, timeout=10, verify=verify
+        )
         response.raise_for_status()
         pr_data = response.json()
-        
+
         # Display success message
         pr_id = pr_data.get("id")
         pr_links = pr_data.get("links", {}).get("self", [])
         pr_url = pr_links[0].get("href") if pr_links else ""
-        
+
         console.print(f"[bold green]✓[/bold green] Pull Request created successfully!")
         console.print(f"  ID: [cyan]{pr_id}[/cyan]")
         console.print(f"  Title: {title}")
         console.print(f"  URL: [blue]{pr_url}[/blue]")
-        
+
     except requests.exceptions.RequestException as e:
         console.print(f"[bold red]Error creating PR:[/bold red] {e}")
-        if hasattr(e, 'response') and e.response is not None:
+        if hasattr(e, "response") and e.response is not None:
             console.print(f"Status: {e.response.status_code}")
             # Try to print error message from Stash if available
             try:
@@ -344,6 +370,7 @@ def create_pr(
 # ---------------------------------------------------------------------------
 # pr command – show the active PR for the current (or given) branch
 # ---------------------------------------------------------------------------
+
 
 def _find_pr_for_branch(base_url, token, project_key, repo_slug, branch):
     """Return the first OPEN pull request whose source branch matches *branch*."""
@@ -393,8 +420,10 @@ def _render_pr_header(pr, base_url, project_key, repo_slug):
     for r in reviewers:
         name = r.get("user", {}).get("displayName", "?")
         status = r.get("status", "UNAPPROVED")
-        icon = {"APPROVED": "[green]APPROVED[/green]",
-                "NEEDS_WORK": "[yellow]NEEDS WORK[/yellow]"}.get(status, "[dim]UNAPPROVED[/dim]")
+        icon = {
+            "APPROVED": "[green]APPROVED[/green]",
+            "NEEDS_WORK": "[yellow]NEEDS WORK[/yellow]",
+        }.get(status, "[dim]UNAPPROVED[/dim]")
         reviewer_strs.append(f"  {name}: {icon}")
 
     body = Text.from_markup(
@@ -405,9 +434,15 @@ def _render_pr_header(pr, base_url, project_key, repo_slug):
     if link:
         body.append_text(Text.from_markup(f"Link: [blue]{escape(link)}[/blue]\n"))
     if reviewer_strs:
-        body.append_text(Text.from_markup("\n[bold]Reviewers:[/bold]\n" + "\n".join(reviewer_strs) + "\n"))
+        body.append_text(
+            Text.from_markup(
+                "\n[bold]Reviewers:[/bold]\n" + "\n".join(reviewer_strs) + "\n"
+            )
+        )
     if description:
-        body.append_text(Text.from_markup(f"\n[bold]Description:[/bold]\n{escape(description)}\n"))
+        body.append_text(
+            Text.from_markup(f"\n[bold]Description:[/bold]\n{escape(description)}\n")
+        )
 
     console.print(Panel(body, title="Pull Request", border_style="cyan"))
 
@@ -431,13 +466,19 @@ def _build_diff_snippet(anchor, diff):
         for segment in hunk.get("segments", []):
             seg_type = segment.get("type", "CONTEXT")  # ADDED, REMOVED, CONTEXT
             for ln in segment.get("lines", []):
-                line_no = ln.get("destination") if line_type != "REMOVED" else ln.get("source")
-                all_lines.append({
-                    "line_no": line_no,
-                    "code": ln.get("line", ""),
-                    "seg_type": seg_type,
-                    "is_target": line_no == target_line,
-                })
+                line_no = (
+                    ln.get("destination")
+                    if line_type != "REMOVED"
+                    else ln.get("source")
+                )
+                all_lines.append(
+                    {
+                        "line_no": line_no,
+                        "code": ln.get("line", ""),
+                        "seg_type": seg_type,
+                        "is_target": line_no == target_line,
+                    }
+                )
 
     # Find the target line index
     target_idx = None
@@ -527,6 +568,98 @@ def _format_timestamp(timestamp_ms):
     return dt.strftime("%Y-%m-%d %H:%M %Z")
 
 
+def _collect_comment_node(comment):
+    """Recursively build a dict for a comment and its replies."""
+    return {
+        "id": comment.get("id"),
+        "author": comment.get("author", {}).get("displayName", "Unknown"),
+        "text": comment.get("text", ""),
+        "severity": comment.get("severity", "NORMAL"),
+        "state": comment.get("state", ""),
+        "created_date": _format_timestamp(comment.get("createdDate")),
+        "replies": [_collect_comment_node(r) for r in comment.get("comments", [])],
+    }
+
+
+def _collect_comments(base_url, token, project_key, repo_slug, pr_id):
+    """Fetch PR activities and return structured comment data as a dict.
+
+    Returns:
+        {
+            "general": [ <comment_node>, ... ],
+            "inline": [
+                {
+                    "path": str,
+                    "line": int | None,
+                    "line_type": str,
+                    "comment": <comment_node>,
+                },
+                ...
+            ],
+        }
+    """
+    url = (
+        f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}"
+        f"/pull-requests/{pr_id}/activities"
+    )
+    activities = api_get(url, token)
+
+    comment_activities = [
+        a for a in activities if a.get("action") == "COMMENTED" and a.get("comment")
+    ]
+
+    general = []
+    inline = []
+
+    for activity in comment_activities:
+        anchor = activity.get("commentAnchor")
+        comment_node = _collect_comment_node(activity["comment"])
+        if anchor and anchor.get("path"):
+            inline.append(
+                {
+                    "path": anchor["path"],
+                    "line": anchor.get("line"),
+                    "line_type": anchor.get("lineType", ""),
+                    "comment": comment_node,
+                }
+            )
+        else:
+            general.append(comment_node)
+
+    return {"general": general, "inline": inline}
+
+
+def _pr_to_dict(pr_data, comments):
+    """Serialize a PR object + collected comments into a JSON-friendly dict."""
+    links = pr_data.get("links", {}).get("self", [])
+    link = links[0].get("href") if links else ""
+
+    reviewers = []
+    for r in pr_data.get("reviewers", []):
+        reviewers.append(
+            {
+                "username": r.get("user", {}).get("name", ""),
+                "display_name": r.get("user", {}).get("displayName", ""),
+                "status": r.get("status", "UNAPPROVED"),
+            }
+        )
+
+    return {
+        "id": pr_data.get("id"),
+        "title": pr_data.get("title", ""),
+        "description": pr_data.get("description", "") or "",
+        "state": pr_data.get("state", ""),
+        "author": pr_data.get("author", {})
+        .get("user", {})
+        .get("displayName", "Unknown"),
+        "source_branch": pr_data.get("fromRef", {}).get("displayId", ""),
+        "target_branch": pr_data.get("toRef", {}).get("displayId", ""),
+        "url": link,
+        "reviewers": reviewers,
+        "comments": comments,
+    }
+
+
 def _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id):
     """Fetch PR activities and render comments grouped by file with code context."""
     url = (
@@ -536,8 +669,7 @@ def _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id):
     activities = api_get(url, token)
 
     comment_activities = [
-        a for a in activities
-        if a.get("action") == "COMMENTED" and a.get("comment")
+        a for a in activities if a.get("action") == "COMMENTED" and a.get("comment")
     ]
 
     if not comment_activities:
@@ -573,7 +705,9 @@ def _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id):
         for path in by_file:
             by_file[path].sort(key=lambda a: a["commentAnchor"].get("line", 0))
 
-        console.print(f"[bold]Inline Comments ({len(inline)} across {len(by_file)} files)[/bold]\n")
+        console.print(
+            f"[bold]Inline Comments ({len(inline)} across {len(by_file)} files)[/bold]\n"
+        )
 
         for path in sorted(by_file.keys()):
             file_activities = by_file[path]
@@ -581,12 +715,14 @@ def _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id):
                 f"{base_url}/projects/{project_key}/repos/{repo_slug}"
                 f"/pull-requests/{pr_id}/diff#{path}"
             )
-            console.print(Panel(
-                f"[blue]{escape(diff_link)}[/blue]",
-                title=f"[bold magenta]{escape(path)}[/bold magenta]",
-                border_style="magenta",
-                expand=False,
-            ))
+            console.print(
+                Panel(
+                    f"[blue]{escape(diff_link)}[/blue]",
+                    title=f"[bold magenta]{escape(path)}[/bold magenta]",
+                    border_style="magenta",
+                    expand=False,
+                )
+            )
 
             for activity in file_activities:
                 anchor = activity["commentAnchor"]
@@ -613,34 +749,40 @@ def _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id):
 @app.command()
 def pr(
     branch: str = typer.Option(
-        None, "--branch", "-b",
-        help="Branch name to look up (defaults to current branch)"
+        None,
+        "--branch",
+        "-b",
+        help="Branch name to look up (defaults to current branch)",
     ),
     url: str = typer.Option(
-        None, "--url", "-u",
-        help="Stash PR URL to use instead of auto-detecting from git status"
+        None,
+        "--url",
+        "-u",
+        help="Stash PR URL to use instead of auto-detecting from git status",
     ),
     no_comments: bool = typer.Option(
-        False, "--no-comments",
-        help="Skip fetching comments"
+        False, "--no-comments", help="Skip fetching comments"
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
-        help="Print API call details without executing"
+        False, "--dry-run", help="Print API call details without executing"
     ),
     output_format: str = typer.Option(
         "table", "--format", "-f", help="Output format: table, json, csv"
     ),
 ):
     """Show the active Pull Request for the current branch with comments and tasks."""
+    # Use stderr for progress messages when outputting JSON so stdout stays clean.
+    status_console = Console(stderr=True) if output_format == "json" else console
+
     if url:
         base_url, project_key, repo_slug, pr_id = _parse_pr_url(url)
         token = get_access_token()
 
-        console.print(
-            f"Looking up PR [cyan]#{pr_id}[/cyan] in "
-            f"[cyan]{project_key}/{repo_slug}[/cyan]...\n"
-        )
+        if output_format == "table":
+            status_console.print(
+                f"Looking up PR [cyan]#{pr_id}[/cyan] in "
+                f"[cyan]{project_key}/{repo_slug}[/cyan]...\n"
+            )
 
         pr_api_url = (
             f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}"
@@ -661,11 +803,13 @@ def pr(
         try:
             headers = {"Authorization": f"Bearer {token.get()}"}
             verify = get_ssl_verify()
-            response = requests.get(pr_api_url, headers=headers, timeout=10, verify=verify)
+            response = requests.get(
+                pr_api_url, headers=headers, timeout=10, verify=verify
+            )
             response.raise_for_status()
             pr_data = response.json()
         except requests.exceptions.RequestException as e:
-            console.print(f"[bold red]Error fetching PR:[/bold red] {e}")
+            status_console.print(f"[bold red]Error fetching PR:[/bold red] {e}")
             raise typer.Exit(code=1)
     else:
         base_url, token = get_env_vars()
@@ -677,45 +821,74 @@ def pr(
                 repo = Repo(os.getcwd(), search_parent_directories=True)
                 branch = repo.active_branch.name
             except Exception as e:
-                console.print(f"[bold red]Error:[/bold red] Could not determine current branch: {e}")
+                status_console.print(
+                    f"[bold red]Error:[/bold red] Could not determine current branch: {e}"
+                )
                 raise typer.Exit(code=1)
 
-        console.print(f"Looking up active PR for branch [cyan]{branch}[/cyan] "
-                      f"in [cyan]{project_key}/{repo_slug}[/cyan]...\n")
+        status_console.print(
+            f"Looking up active PR for branch [cyan]{branch}[/cyan] "
+            f"in [cyan]{project_key}/{repo_slug}[/cyan]...\n"
+        )
 
         pr_url = f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests"
-        pr_params = {"state": "OPEN", "direction": "OUTGOING", "at": f"refs/heads/{branch}"}
+        pr_params = {
+            "state": "OPEN",
+            "direction": "OUTGOING",
+            "at": f"refs/heads/{branch}",
+        }
 
         if dry_run:
             safe_headers = {"Authorization": f"Bearer {token}"}
             print_api_call("GET", pr_url, headers=safe_headers, params=pr_params)
             if not no_comments:
-                print_api_call("GET",
-                               f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests/{{prId}}/activities",
-                               headers=safe_headers)
+                print_api_call(
+                    "GET",
+                    f"{base_url}/rest/api/1.0/projects/{project_key}/repos/{repo_slug}/pull-requests/{{prId}}/activities",
+                    headers=safe_headers,
+                )
             return
 
         try:
-            pr_data = _find_pr_for_branch(base_url, token, project_key, repo_slug, branch)
+            pr_data = _find_pr_for_branch(
+                base_url, token, project_key, repo_slug, branch
+            )
         except requests.exceptions.RequestException as e:
-            console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
+            status_console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
             raise typer.Exit(code=1)
 
         if not pr_data:
-            console.print(f"[yellow]No open pull request found for branch '{branch}'.[/yellow]")
+            status_console.print(
+                f"[yellow]No open pull request found for branch '{branch}'.[/yellow]"
+            )
             raise typer.Exit(code=0)
 
         pr_id = pr_data.get("id")
 
-    # --- Header ---
-    _render_pr_header(pr_data, base_url, project_key, repo_slug)
+    if output_format == "json":
+        # --- JSON output ---
+        comments = {}
+        if not no_comments:
+            try:
+                comments = _collect_comments(
+                    base_url, token, project_key, repo_slug, pr_id
+                )
+            except requests.exceptions.RequestException as e:
+                Console(stderr=True).print(
+                    f"[bold red]Error fetching comments:[/bold red] {e}"
+                )
+        print(json.dumps(_pr_to_dict(pr_data, comments), indent=2, ensure_ascii=False))
+    else:
+        # --- Default rich/table output ---
+        _render_pr_header(pr_data, base_url, project_key, repo_slug)
 
-    # --- Comments ---
-    if not no_comments:
-        try:
-            _fetch_and_render_comments(base_url, token, project_key, repo_slug, pr_id)
-        except requests.exceptions.RequestException as e:
-            console.print(f"[bold red]Error fetching comments:[/bold red] {e}")
+        if not no_comments:
+            try:
+                _fetch_and_render_comments(
+                    base_url, token, project_key, repo_slug, pr_id
+                )
+            except requests.exceptions.RequestException as e:
+                console.print(f"[bold red]Error fetching comments:[/bold red] {e}")
 
 
 def _resolve_pr_context(url: str | None):
@@ -736,7 +909,9 @@ def _resolve_pr_context(url: str | None):
             repo = Repo(os.getcwd(), search_parent_directories=True)
             branch = repo.active_branch.name
         except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] Could not determine current branch: {e}")
+            console.print(
+                f"[bold red]Error:[/bold red] Could not determine current branch: {e}"
+            )
             raise typer.Exit(code=1)
 
         console.print(
@@ -745,13 +920,17 @@ def _resolve_pr_context(url: str | None):
         )
 
         try:
-            pr_data = _find_pr_for_branch(base_url, token, project_key, repo_slug, branch)
+            pr_data = _find_pr_for_branch(
+                base_url, token, project_key, repo_slug, branch
+            )
         except requests.exceptions.RequestException as e:
             console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
             raise typer.Exit(code=1)
 
         if not pr_data:
-            console.print(f"[yellow]No open pull request found for branch '{branch}'.[/yellow]")
+            console.print(
+                f"[yellow]No open pull request found for branch '{branch}'.[/yellow]"
+            )
             raise typer.Exit(code=0)
 
         pr_id = str(pr_data.get("id"))
@@ -762,14 +941,19 @@ def _resolve_pr_context(url: str | None):
 # pr comment – post a general comment on a pull request
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def pr_comment(
     text: str = typer.Argument(..., help="Comment text to post on the pull request"),
     url: str = typer.Option(
-        None, "--url", "-u",
-        help="Stash PR URL (auto-detected from current branch when omitted)"
+        None,
+        "--url",
+        "-u",
+        help="Stash PR URL (auto-detected from current branch when omitted)",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print API call details without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print API call details without executing"
+    ),
 ):
     """Post a general comment on a Pull Request."""
     base_url, token, project_key, repo_slug, pr_id = _resolve_pr_context(url)
@@ -785,13 +969,18 @@ def pr_comment(
     payload = {"text": text}
 
     if dry_run:
-        safe_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        safe_headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
         print_api_call("POST", api_url, headers=safe_headers, payload=payload)
         return
 
     try:
         verify = get_ssl_verify()
-        response = requests.post(api_url, headers=headers, json=payload, timeout=10, verify=verify)
+        response = requests.post(
+            api_url, headers=headers, json=payload, timeout=10, verify=verify
+        )
         response.raise_for_status()
         comment_data = response.json()
         comment_id = comment_data.get("id")
@@ -817,14 +1006,19 @@ def pr_comment(
 # pr add-reviewer / pr remove-reviewer – reviewer management
 # ---------------------------------------------------------------------------
 
+
 @app.command()
 def pr_add_reviewer(
     usernames: list[str] = typer.Argument(..., help="Reviewer username(s) to add"),
     url: str = typer.Option(
-        None, "--url", "-u",
-        help="Stash PR URL (auto-detected from current branch when omitted)"
+        None,
+        "--url",
+        "-u",
+        help="Stash PR URL (auto-detected from current branch when omitted)",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print API call details without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print API call details without executing"
+    ),
 ):
     """Add one or more reviewers to a Pull Request."""
     base_url, token, project_key, repo_slug, pr_id = _resolve_pr_context(url)
@@ -839,10 +1033,15 @@ def pr_add_reviewer(
     }
 
     if dry_run:
-        safe_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        safe_headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
         for username in usernames:
             payload = {"user": {"name": username}, "role": "REVIEWER"}
-            print_api_call("POST", participants_url, headers=safe_headers, payload=payload)
+            print_api_call(
+                "POST", participants_url, headers=safe_headers, payload=payload
+            )
         return
 
     verify = get_ssl_verify()
@@ -853,7 +1052,11 @@ def pr_add_reviewer(
         payload = {"user": {"name": username}, "role": "REVIEWER"}
         try:
             response = requests.post(
-                participants_url, headers=headers, json=payload, timeout=10, verify=verify
+                participants_url,
+                headers=headers,
+                json=payload,
+                timeout=10,
+                verify=verify,
             )
             response.raise_for_status()
             added.append(username)
@@ -864,19 +1067,25 @@ def pr_add_reviewer(
                 status = f" (HTTP {e.response.status_code})"
                 try:
                     err_data = e.response.json()
-                    msgs = [err.get("message", "") for err in err_data.get("errors", [])]
+                    msgs = [
+                        err.get("message", "") for err in err_data.get("errors", [])
+                    ]
                     msg = ": " + "; ".join(msgs) if msgs else ""
                 except Exception:
                     pass
             failed.append((username, f"{e}{status}{msg}"))
 
     if added:
-        console.print(f"[bold green]✓[/bold green] Added reviewer(s) to PR [cyan]{project_key}/{repo_slug}#{pr_id}[/cyan]:")
+        console.print(
+            f"[bold green]✓[/bold green] Added reviewer(s) to PR [cyan]{project_key}/{repo_slug}#{pr_id}[/cyan]:"
+        )
         for u in added:
             console.print(f"  [green]+[/green] {u}")
     if failed:
         for username, reason in failed:
-            console.print(f"[bold red]✗[/bold red] Failed to add [yellow]{username}[/yellow]: {reason}")
+            console.print(
+                f"[bold red]✗[/bold red] Failed to add [yellow]{username}[/yellow]: {reason}"
+            )
         raise typer.Exit(code=1)
 
 
@@ -884,10 +1093,14 @@ def pr_add_reviewer(
 def pr_remove_reviewer(
     username: str = typer.Argument(..., help="Reviewer username to remove"),
     url: str = typer.Option(
-        None, "--url", "-u",
-        help="Stash PR URL (auto-detected from current branch when omitted)"
+        None,
+        "--url",
+        "-u",
+        help="Stash PR URL (auto-detected from current branch when omitted)",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print API call details without executing"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print API call details without executing"
+    ),
 ):
     """Remove a reviewer from a Pull Request."""
     base_url, token, project_key, repo_slug, pr_id = _resolve_pr_context(url)
@@ -905,10 +1118,14 @@ def pr_remove_reviewer(
 
     try:
         verify = get_ssl_verify()
-        response = requests.delete(participant_url, headers=headers, timeout=10, verify=verify)
+        response = requests.delete(
+            participant_url, headers=headers, timeout=10, verify=verify
+        )
         response.raise_for_status()
 
-        console.print(f"[bold green]✓[/bold green] Removed reviewer [yellow]{username}[/yellow] from PR [cyan]{project_key}/{repo_slug}#{pr_id}[/cyan]")
+        console.print(
+            f"[bold green]✓[/bold green] Removed reviewer [yellow]{username}[/yellow] from PR [cyan]{project_key}/{repo_slug}#{pr_id}[/cyan]"
+        )
     except requests.exceptions.RequestException as e:
         console.print(f"[bold red]Error removing reviewer:[/bold red] {e}")
         if hasattr(e, "response") and e.response is not None:
