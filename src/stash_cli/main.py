@@ -628,6 +628,9 @@ def pr(
         False, "--dry-run",
         help="Print API call details without executing"
     ),
+    output_format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table, json, csv"
+    ),
 ):
     """Show the active Pull Request for the current branch with comments and tasks."""
     if url:

@@ -4,3 +4,5 @@ build/
 dist/
 htmlcov
 project-notes.org
+
+*/__pycache__/*

@@ -3,20 +3,36 @@ name = "stash-cli"
 version = "0.2.0"
 description = "CLI tool for Stash/Bitbucket Server"
 authors = [
-    {name = "Juan Gonzalez",email = "juan.angel19@hotmail.com"}
+    {name = "Juan Gonzalez", email = "juang@wolfram.com"}
 ]
+requires-python = ">=3.10"
 readme = "README.md"
-requires-python = "^3.10"
+classifiers = [
+    "Programming Language :: Python :: 2",
+    "Programming Language :: Python :: 2.7",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.4",
+    "Programming Language :: Python :: 3.5",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "typer (>=0.21.2,<0.22.0)",
     "requests (>=2.32.5,<3.0.0)",
     "gitpython (>=3.1.46,<4.0.0)",
-    "rich (>=14.3.2,<15.0.0)"
+    "rich (>=14.3.2,<15.0.0)",
 ]
 
 [project.scripts]
 stash-cli = "stash_cli.main:app"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.9.10,<0.10.0"]
+build-backend = "uv_build"
