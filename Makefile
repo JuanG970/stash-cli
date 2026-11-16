@@ -1,4 +1,4 @@
-.PHONY: install test
+.PHONY: install test test-emacs
 
 install:
 	uv tool install --force -e .
@@ -7,3 +7,6 @@ install:
 # untouched for a test-only dependency.
 test:
 	uv run --with "pytest>=8,<9" pytest
+
+test-emacs:
+	emacs -Q --batch -L . -L tests -l tests/stash-cli-tests.el -f ert-run-tests-batch-and-exit
