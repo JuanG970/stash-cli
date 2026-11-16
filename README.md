@@ -76,6 +76,21 @@ stash-cli list-reviews --format json   # includes repo and draft flags
 
 This works from any directory (no git repository needed).
 
+### My pull requests at a glance
+
+One view of what is waiting on you and what you have open, with counts: the pull
+requests awaiting your review, then your own open ones.
+
+```bash
+stash-cli my-prs
+stash-cli my-prs --format json   # {"summary": ..., "awaiting_review": [...], "authored": [...]}
+```
+
+The Comments and Tasks columns (and the totals) come from the `commentCount` and
+`openTaskCount` properties that the dashboard lists on the Bitbucket Server versions
+that send them; they show `-` (JSON `null`) when the server sends none. Stash has no
+notifications to count. For one pull request in full, use `stash-cli pr`.
+
 ### Create Pull Request
 
 Create a new pull request:
@@ -125,6 +140,7 @@ The following commands support `--format json` for machine-readable output:
 
 - `stash-cli list-prs --format json`
 - `stash-cli list-reviews --format json`
+- `stash-cli my-prs --format json`
 - `stash-cli create-pr --format json`
 - `stash-cli pr --format json`
 - `stash-cli pr-comment --format json`
@@ -260,7 +276,7 @@ git checkout -b feature/your-feature
 stash-cli <command> --dry-run  # Preview API calls
 stash-cli <command>             # Execute actual command
 make test-emacs                 # Run the Emacs ERT suite
-python -m unittest tests.test_list_reviews   # Run the Python tests
+python -m unittest tests.test_list_reviews tests.test_my_prs   # Run the Python tests
 ```
 
 ### Testing with dry-run
@@ -320,6 +336,15 @@ List open pull requests awaiting your review (any repository).
 
 Options:
 - `--dry-run` - Preview API call without executing
+- `--format, -f` - Output `table` or `json`
+
+### my-prs
+
+Your pull requests at a glance: those awaiting your review and your own open ones,
+with a summary line (counts, and comments and open tasks where the server sends them).
+
+Options:
+- `--dry-run` - Preview the two API calls without executing
 - `--format, -f` - Output `table` or `json`
 
 ### create-pr

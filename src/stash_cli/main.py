@@ -380,6 +380,136 @@ def list_reviews(
     status_console.print(table)
 
 
+def _pr_counts(pr_data):
+    """Comment and open-task counts of a PR; None for what the server did not send.
+
+    They are read from the PR's "properties" (commentCount, openTaskCount), which
+    the dashboard lists on the Bitbucket Server versions that send them. These
+    names are not read anywhere else in stash-cli yet.
+    """
+    properties = pr_data.get("properties") or {}
+    return {
+        "comments": properties.get("commentCount"),
+        "open_tasks": properties.get("openTaskCount"),
+    }
+
+
+def _sum_known(counts):
+    """Sum of the counts that are numbers, or None when there are none."""
+    known = [count for count in counts if isinstance(count, int)]
+    return sum(known) if known else None
+
+
+def _counted(count, noun):
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def _my_prs_table(title, prs, show_author):
+    table = Table(title=f"{title} ({len(prs)})")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Repo", style="magenta")
+    table.add_column("Title", style="white")
+    if show_author:
+        table.add_column("Author", style="green")
+    table.add_column("Draft", style="yellow")
+    table.add_column("Comments", justify="right")
+    table.add_column("Tasks", justify="right")
+    for pr in prs:
+        row = [str(pr["id"]), escape(pr["repo"]), escape(pr["title"])]
+        if show_author:
+            row.append(escape(pr["author"]))
+        row.append("yes" if pr["draft"] else "")
+        row.append("-" if pr["comments"] is None else str(pr["comments"]))
+        row.append("-" if pr["open_tasks"] is None else str(pr["open_tasks"]))
+        table.add_row(*row)
+    return table
+
+
+@app.command()
+def my_prs(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print API call details without executing"
+    ),
+    output_format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table or json"
+    ),
+):
+    """Your pull requests at a glance: awaiting your review, and open ones you wrote.
+
+    A quick view with counts; `stash-cli pr` shows one pull request in full.
+    Stash has no notifications to count here: this is what the dashboard lists.
+    """
+    base_url, token = get_env_vars()
+    status_console = Console(stderr=True) if output_format == "json" else console
+
+    status_console.print("Fetching your pull requests...")
+
+    # The dashboard endpoint is relative to the token's user, so it needs
+    # neither a username nor a git repository.
+    api_url = f"{base_url}/rest/api/1.0/dashboard/pull-requests"
+    queries = {
+        "awaiting_review": {
+            "role": "REVIEWER",
+            "state": "OPEN",
+            "participantStatus": "UNAPPROVED",
+        },
+        "authored": {"role": "AUTHOR", "state": "OPEN"},
+    }
+
+    if dry_run:
+        safe_headers = {"Authorization": f"Bearer {token}"}
+        for params in queries.values():
+            print_api_call("GET", api_url, headers=safe_headers, params=params)
+        return
+
+    try:
+        found = {
+            name: api_get(api_url, token, params=params)
+            for name, params in queries.items()
+        }
+    except requests.exceptions.RequestException as e:
+        status_console.print(
+            f"[bold red]Error fetching your pull requests:[/bold red] {escape(str(e))}"
+        )
+        raise typer.Exit(code=1)
+
+    awaiting = [{**_pr_summary_to_dict(pr), **_pr_counts(pr)} for pr in found["awaiting_review"]]
+    authored = [{**_pr_summary_to_dict(pr), **_pr_counts(pr)} for pr in found["authored"]]
+    everything = awaiting + authored
+    summary = {
+        "awaiting_review": len(awaiting),
+        "authored": len(authored),
+        "drafts": sum(1 for pr in authored if pr["draft"]),
+        "comments": _sum_known(pr["comments"] for pr in everything),
+        "open_tasks": _sum_known(pr["open_tasks"] for pr in everything),
+    }
+
+    if output_format == "json":
+        emit_json({"summary": summary, "awaiting_review": awaiting, "authored": authored})
+        return
+
+    parts = [
+        f"[bold]{summary['awaiting_review']}[/bold] awaiting your review",
+        f"[bold]{summary['authored']}[/bold] of yours open",
+    ]
+    if summary["drafts"]:
+        parts.append(f"{summary['drafts']} of them draft")
+    if summary["comments"] is not None:
+        parts.append(_counted(summary["comments"], "comment"))
+    if summary["open_tasks"] is not None:
+        parts.append(_counted(summary["open_tasks"], "open task"))
+    status_console.print(", ".join(parts))
+
+    if awaiting:
+        status_console.print(_my_prs_table("Awaiting Your Review", awaiting, True))
+    else:
+        status_console.print("[yellow]No pull requests awaiting your review.[/yellow]")
+    if authored:
+        status_console.print(_my_prs_table("Your Open Pull Requests", authored, False))
+    else:
+        status_console.print("[yellow]None of your pull requests is open.[/yellow]")
+
+
 @app.command()
 def create_pr(
     title: str = typer.Option(..., "--title", "-t", help="Pull request title"),
