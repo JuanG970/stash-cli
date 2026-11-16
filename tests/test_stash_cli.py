@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+import requests
 import typer
 from git import Repo
 from typer.testing import CliRunner
@@ -158,3 +159,101 @@ def test_dry_run_commands_are_offline_and_redacted(
     assert result.exit_code == 0, result.output
     assert TOKEN not in result.stdout
     assert "***REDACTED***" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Missing-variable and error-reporting contract
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "present, listed",
+    [
+        ({}, ["STASH_BASE_URL", "STASH_ACCESS_TOKEN"]),
+        ({"STASH_BASE_URL": BASE_URL}, ["STASH_ACCESS_TOKEN"]),
+    ],
+)
+def test_missing_env_vars_lists_every_missing_variable(monkeypatch, present, listed):
+    for name in ("STASH_BASE_URL", "STASH_ACCESS_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in present.items():
+        monkeypatch.setenv(name, value)
+
+    result = CliRunner().invoke(app, ["list-prs"])
+
+    assert result.exit_code == 1
+    for name in ("STASH_BASE_URL", "STASH_ACCESS_TOKEN"):
+        assert (name in result.output) is (name in listed)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["list-prs", "--no-such-option"], ["create-pr"], ["no-such-command"]],
+)
+def test_usage_errors_exit_2(args):
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 2, result.output
+
+
+class _FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
+
+
+def test_non_json_error_body_exits_1_without_crashing(git_repo, stash_env, monkeypatch):
+    def fail(*args, **kwargs):
+        raise requests.exceptions.HTTPError(
+            "502 Server Error",
+            response=_FakeResponse(ValueError("not json"), status_code=502),
+        )
+
+    monkeypatch.setattr("stash_cli.main.requests.get", fail)
+    result = CliRunner().invoke(app, ["list-prs"])
+
+    assert result.exit_code == 1
+    assert "Status: 502" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_json_mode_fails_non_zero_when_comments_cannot_be_fetched(monkeypatch):
+    monkeypatch.setenv("STASH_ACCESS_TOKEN", TOKEN)
+    prepared = requests.Request("GET", f"{BASE_URL}/x/activities").prepare()
+
+    def fake_get(url, **kwargs):
+        if url.endswith("/activities"):
+            raise requests.exceptions.ConnectionError(
+                "Max retries exceeded: NameResolutionError('Failed to resolve host')",
+                request=prepared,
+            )
+        return _FakeResponse(SAMPLE_PR)
+
+    monkeypatch.setattr("stash_cli.main.requests.get", fake_get)
+    result = CliRunner().invoke(app, ["pr", "--url", PR_URL, "--format", "json"])
+
+    assert result.exit_code == 1
+    assert result.stdout.strip() == ""
+    assert "Not emitting partial JSON" in result.stderr
+    # Actionable message naming the host, not the raw urllib3 blob.
+    assert "could not reach stash.example.com" in result.stderr
+    assert "NameResolutionError" not in result.stderr
+
+
+def test_json_mode_without_comments_exits_zero(monkeypatch):
+    monkeypatch.setenv("STASH_ACCESS_TOKEN", TOKEN)
+    monkeypatch.setattr(
+        "stash_cli.main.requests.get", lambda url, **kwargs: _FakeResponse(SAMPLE_PR)
+    )
+
+    result = CliRunner().invoke(app, ["pr", "--url", PR_URL, "--format", "json", "--no-comments"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["id"] == 42
