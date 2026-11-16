@@ -87,6 +87,23 @@ Use `--dry-run` to preview without creating:
 stash-cli create-pr --title "Test PR" --dry-run
 ```
 
+### Machine-readable output
+
+`stash-cli pr --format json` writes one JSON object to stdout and sends progress
+messages to stderr, so it can be piped. The contract is all-or-nothing: if the
+comment fetch fails, the command exits 1 and prints no JSON rather than emitting a
+silently truncated payload. Pass `--no-comments` to request PR data without comments.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success (including "no open pull request for this branch") |
+| 1 | User or API error: missing environment variables, invalid PR URL, network or HTTP failure |
+| 2 | Usage error: unknown command or option, missing required option |
+
+Missing-credential errors list every unset variable in one run.
+
 ## Developer Workflow
 
 ### Setting up for development
@@ -191,7 +208,7 @@ Options:
 - Add a git remote: `git remote add origin <url>`
 
 **Error: Missing environment variables**
-- Set STASH_BASE_URL and STASH_ACCESS_TOKEN environment variables
+- Set the variables listed in the error (STASH_BASE_URL and STASH_ACCESS_TOKEN); all missing ones are reported at once
 
 **SSL verification errors**
 - Use `--dry-run` to verify the endpoint is correct

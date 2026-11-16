@@ -4,6 +4,7 @@ import json
 import typer
 import requests
 from datetime import datetime, timezone
+from typing import NoReturn
 import urllib.parse
 import urllib3
 from git import Repo, InvalidGitRepositoryError
@@ -89,20 +90,40 @@ def callback():
     """
 
 
+def _describe_request_error(exc):
+    """Return one actionable line for a request failure (no raw urllib3 blob)."""
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        url = getattr(getattr(exc, "request", None), "url", "") or ""
+        host = urllib.parse.urlsplit(url).netloc
+        target = f" {host}" if host else ""
+        return f"could not reach{target} — check the host name, DNS, and VPN"
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "the request timed out — the server may be unreachable"
+    return str(exc)
+
+
+def _report_missing_env_vars(missing) -> NoReturn:
+    """Print every missing variable, one per line, and exit 1."""
+    console.print("[bold red]Error:[/bold red] Missing environment variables.")
+    console.print("Please set the following environment variables:")
+    for name in missing:
+        hint = " (e.g., https://stash.example.com)" if name == "STASH_BASE_URL" else ""
+        console.print(f"  - [bold yellow]{name}[/bold yellow]{hint}")
+    raise typer.Exit(code=1)
+
+
 def get_env_vars():
     base_url = os.environ.get("STASH_BASE_URL")
     token = Secret(os.environ.get("STASH_ACCESS_TOKEN", ""))
 
-    if not base_url or not token.get():
-        console.print("[bold red]Error:[/bold red] Missing environment variables.")
-        console.print("Please set the following environment variables:")
-        if not base_url:
-            console.print(
-                "  - [bold yellow]STASH_BASE_URL[/bold yellow] (e.g., https://stash.example.com)"
-            )
-        if not token:
-            console.print("  - [bold yellow]STASH_ACCESS_TOKEN[/bold yellow]")
-        raise typer.Exit(code=1)
+    missing = []
+    if not base_url:
+        missing.append("STASH_BASE_URL")
+    # The Secret wrapper is always truthy; test the unwrapped value.
+    if not token.get():
+        missing.append("STASH_ACCESS_TOKEN")
+    if missing:
+        _report_missing_env_vars(missing)
 
     return base_url.rstrip("/"), token
 
@@ -110,10 +131,7 @@ def get_env_vars():
 def get_access_token():
     token = Secret(os.environ.get("STASH_ACCESS_TOKEN", ""))
     if not token.get():
-        console.print("[bold red]Error:[/bold red] Missing environment variables.")
-        console.print("Please set the following environment variables:")
-        console.print("  - [bold yellow]STASH_ACCESS_TOKEN[/bold yellow]")
-        raise typer.Exit(code=1)
+        _report_missing_env_vars(["STASH_ACCESS_TOKEN"])
     return token
 
 
@@ -220,7 +238,7 @@ def list_prs(
         response.raise_for_status()
         data = response.json()
     except requests.exceptions.RequestException as e:
-        console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
+        console.print(f"[bold red]Error fetching PRs:[/bold red] {_describe_request_error(e)}")
         if hasattr(e, "response") and e.response is not None:
             console.print(f"Status: {e.response.status_code}")
             # Try to print error message from Stash if available
@@ -229,8 +247,8 @@ def list_prs(
                 errors = err_data.get("errors", [])
                 for err in errors:
                     console.print(f"[red]{err.get('message')}[/red]")
-            except:
-                pass
+            except (ValueError, AttributeError, TypeError):
+                pass  # error body is not the shape we expect; status line stands
         raise typer.Exit(code=1)
 
     values = data.get("values", [])
@@ -353,7 +371,7 @@ def create_pr(
         console.print(f"  URL: [blue]{pr_url}[/blue]")
 
     except requests.exceptions.RequestException as e:
-        console.print(f"[bold red]Error creating PR:[/bold red] {e}")
+        console.print(f"[bold red]Error creating PR:[/bold red] {_describe_request_error(e)}")
         if hasattr(e, "response") and e.response is not None:
             console.print(f"Status: {e.response.status_code}")
             # Try to print error message from Stash if available
@@ -362,8 +380,8 @@ def create_pr(
                 errors = err_data.get("errors", [])
                 for err in errors:
                     console.print(f"[red]{err.get('message')}[/red]")
-            except:
-                pass
+            except (ValueError, AttributeError, TypeError):
+                pass  # error body is not the shape we expect; status line stands
         raise typer.Exit(code=1)
 
 
@@ -809,7 +827,9 @@ def pr(
             response.raise_for_status()
             pr_data = response.json()
         except requests.exceptions.RequestException as e:
-            status_console.print(f"[bold red]Error fetching PR:[/bold red] {e}")
+            status_console.print(
+                f"[bold red]Error fetching PR:[/bold red] {_describe_request_error(e)}"
+            )
             raise typer.Exit(code=1)
     else:
         base_url, token = get_env_vars()
@@ -854,7 +874,9 @@ def pr(
                 base_url, token, project_key, repo_slug, branch
             )
         except requests.exceptions.RequestException as e:
-            status_console.print(f"[bold red]Error fetching PRs:[/bold red] {e}")
+            status_console.print(
+                f"[bold red]Error fetching PRs:[/bold red] {_describe_request_error(e)}"
+            )
             raise typer.Exit(code=1)
 
         if not pr_data:
@@ -867,6 +889,8 @@ def pr(
 
     if output_format == "json":
         # --- JSON output ---
+        # Machine consumers get an all-or-nothing contract: a failed comment
+        # fetch exits non-zero rather than emitting a silently truncated payload.
         comments = {}
         if not no_comments:
             try:
@@ -875,8 +899,13 @@ def pr(
                 )
             except requests.exceptions.RequestException as e:
                 Console(stderr=True).print(
-                    f"[bold red]Error fetching comments:[/bold red] {e}"
+                    f"[bold red]Error fetching comments:[/bold red] {_describe_request_error(e)}"
                 )
+                Console(stderr=True).print(
+                    "[dim]Not emitting partial JSON. Re-run with --no-comments "
+                    "to request PR data without comments.[/dim]"
+                )
+                raise typer.Exit(code=1)
         print(json.dumps(_pr_to_dict(pr_data, comments), indent=2, ensure_ascii=False))
     else:
         # --- Default rich/table output ---
@@ -888,7 +917,9 @@ def pr(
                     base_url, token, project_key, repo_slug, pr_id
                 )
             except requests.exceptions.RequestException as e:
-                console.print(f"[bold red]Error fetching comments:[/bold red] {e}")
+                console.print(
+                    f"[bold red]Error fetching comments:[/bold red] {_describe_request_error(e)}"
+                )
 
 
 def _resolve_pr_context(url: str | None):
